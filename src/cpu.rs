@@ -7,6 +7,7 @@ pub struct Chip8 {
     pub stack: [u16; 12],
     pub program_counter: usize,
     pub stack_pointer: usize,
+    pub running: bool,
 }
 
 impl Chip8 {
@@ -18,6 +19,7 @@ impl Chip8 {
             stack: [0u16; 12],
             program_counter: 0usize,
             stack_pointer: 0usize,
+            running: false,
         }
     }
 
@@ -33,6 +35,13 @@ impl Chip8 {
         self.program_counter += 2;
     }
 
+    pub fn run(&mut self) {
+        self.running = true;
+        while self.running {
+            self.cycle();
+        }
+    }
+
     pub fn cycle(&mut self) {
         let opcode = self.read_opcode();
         self.increment_pc();
@@ -44,10 +53,21 @@ impl Chip8 {
 
         let nnn = opcode & 0x0FFF;
 
+        let kk = (opcode & 0x00FF >> 8) as u8;
+
         match (c, x, y, d) {
+            (0, 0, 0, 0) => {
+                self.running = false;
+                return;
+            }
             (0, 0, 0xE, 0) => self.clear_display(),
+            (0, 0, 0xE, 0xE) => self.ret(),
             (0x1, _, _, _) => self.jump_nnn(nnn),
             (0x2, _, _, _) => self.call_subroutine(nnn),
+            (0x3, _, _, _) => self.skip_e(x, kk),
+            (0x4, _, _, _) => self.skip_ne(x, kk),
+            (0x5, _, _, 0x0) => self.skip_e_xy(x, y),
+            (0x6, _, _, _) => self.load_byte_in_x(x, kk),
             (0x8, _, _, 0x4) => self.add_xy(x, y),
             _ => (),
         }
@@ -59,6 +79,14 @@ impl Chip8 {
         }
     }
 
+    pub fn ret(&mut self) {
+        if self.program_counter == 0 {
+            panic!("STACK UNDERFLOW");
+        }
+        self.stack_pointer -= 1;
+        self.program_counter = self.stack[self.stack_pointer] as usize;
+    }
+
     pub fn jump_nnn(&mut self, nnn: u16) {
         // Move program counter to address nnn
         self.program_counter = nnn as usize;
@@ -67,6 +95,7 @@ impl Chip8 {
     pub fn call_subroutine(&mut self, nnn: u16) {
         // Move program counter to address nnn
         // and put cuurent address on stack as return addr
+        println!("MOVING TO ADDR {:x}", &nnn);
         let sp = self.stack_pointer;
         let stack = &mut self.stack;
 
@@ -77,6 +106,25 @@ impl Chip8 {
         self.stack[sp] = self.program_counter as u16;
         self.stack_pointer += 1;
         self.program_counter = nnn as usize;
+    }
+
+    pub fn skip_e(&mut self, x: u8, kk: u8) {
+        if self.registers[x as usize] == kk {
+            self.program_counter += 2;
+        }
+    }
+    pub fn skip_ne(&mut self, x: u8, kk: u8) {
+        if self.registers[x as usize] != kk {
+            self.program_counter += 2;
+        }
+    }
+    pub fn skip_e_xy(&mut self, x: u8, y: u8) {
+        if self.registers[x as usize] == y {
+            self.program_counter += 2;
+        }
+    }
+    pub fn load_byte_in_x(&mut self, x: u8, kk: u8) {
+        self.registers[x as usize] = kk;
     }
 
     pub fn add_xy(&mut self, x: u8, y: u8) {
