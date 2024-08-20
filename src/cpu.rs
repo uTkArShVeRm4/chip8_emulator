@@ -68,7 +68,13 @@ impl Chip8 {
             (0x4, _, _, _) => self.skip_ne(x, kk),
             (0x5, _, _, 0x0) => self.skip_e_xy(x, y),
             (0x6, _, _, _) => self.load_byte_in_x(x, kk),
+            (0x7, _, _, _) => self.add_x_kk(x, kk),
+            (0x8, _, _, 0x0) => self.load_y_in_x(x, y),
+            (0x8, _, _, 0x1) => self.or_xy(x, y),
+            (0x8, _, _, 0x2) => self.and_xy(x, y),
+            (0x8, _, _, 0x3) => self.xor_xy(x, y),
             (0x8, _, _, 0x4) => self.add_xy(x, y),
+            (0x8, _, _, 0x5) => self.sub_xy(x, y),
             _ => (),
         }
     }
@@ -113,18 +119,38 @@ impl Chip8 {
             self.program_counter += 2;
         }
     }
+
     pub fn skip_ne(&mut self, x: u8, kk: u8) {
         if self.registers[x as usize] != kk {
             self.program_counter += 2;
         }
     }
+
     pub fn skip_e_xy(&mut self, x: u8, y: u8) {
         if self.registers[x as usize] == y {
             self.program_counter += 2;
         }
     }
+
     pub fn load_byte_in_x(&mut self, x: u8, kk: u8) {
         self.registers[x as usize] = kk;
+    }
+
+    pub fn add_x_kk(&mut self, x: u8, kk: u8) {
+        let arg1 = self.registers[x as usize];
+        let arg2 = kk;
+        let (sum, overflow) = arg1.overflowing_add(arg2);
+        if overflow {
+            self.registers[0xF] = 1;
+        } else {
+            self.registers[0xF] = 0;
+        }
+
+        self.registers[x as usize] = sum;
+    }
+
+    pub fn load_y_in_x(&mut self, x: u8, y: u8) {
+        self.registers[x as usize] = self.registers[y as usize];
     }
 
     pub fn add_xy(&mut self, x: u8, y: u8) {
@@ -139,5 +165,41 @@ impl Chip8 {
         }
 
         self.registers[x as usize] = sum;
+    }
+
+    pub fn or_xy(&mut self, x: u8, y: u8) {
+        let arg1 = self.registers[x as usize];
+        let arg2 = self.registers[y as usize];
+
+        self.registers[x as usize] = arg1 | arg2;
+    }
+
+    pub fn and_xy(&mut self, x: u8, y: u8) {
+        let arg1 = self.registers[x as usize];
+        let arg2 = self.registers[y as usize];
+
+        self.registers[x as usize] = arg1 & arg2;
+    }
+
+    pub fn xor_xy(&mut self, x: u8, y: u8) {
+        let arg1 = self.registers[x as usize];
+        let arg2 = self.registers[y as usize];
+
+        self.registers[x as usize] = arg1 ^ arg2;
+    }
+
+    pub fn sub_xy(&mut self, x: u8, y: u8) {
+        let arg1 = self.registers[x as usize];
+        let arg2 = self.registers[y as usize];
+        let diff;
+
+        if arg1 > arg2 {
+            self.registers[0xF] = 1;
+            diff = arg1 - arg2;
+        } else {
+            self.registers[0xF] = 0;
+            diff = arg2 - arg1;
+        }
+        self.registers[x as usize] = diff;
     }
 }
