@@ -3,10 +3,11 @@ use core::panic;
 pub struct Chip8 {
     pub memory: [u8; 4096],
     pub registers: [u8; 16],
-    pub display: [bool; 32 * 16],
+    pub display: [[bool; 32]; 64],
     pub stack: [u16; 12],
     pub program_counter: usize,
     pub stack_pointer: usize,
+    pub index: usize,
     pub running: bool,
 }
 
@@ -15,10 +16,11 @@ impl Chip8 {
         Chip8 {
             memory: [0u8; 4096],
             registers: [0u8; 16],
-            display: [false; 32 * 16],
+            display: [[false; 32]; 64],
             stack: [0u16; 12],
             program_counter: 0usize,
             stack_pointer: 0usize,
+            index: 0usize,
             running: false,
         }
     }
@@ -75,13 +77,17 @@ impl Chip8 {
             (0x8, _, _, 0x3) => self.xor_xy(x, y),
             (0x8, _, _, 0x4) => self.add_xy(x, y),
             (0x8, _, _, 0x5) => self.sub_xy(x, y),
+            (0xA, _, _, _) => self.set_index_register(nnn),
+            (0xD, _, _, _) => self.draw(x, y, d), // d is n here, height of sprite
             _ => (),
         }
     }
 
     pub fn clear_display(&mut self) {
-        for i in 0..32 * 16 {
-            self.display[i as usize] = false;
+        for i in 0..64 {
+            for j in 0..32 {
+                self.display[i as usize][j as usize] = false;
+            }
         }
     }
 
@@ -202,4 +208,52 @@ impl Chip8 {
         }
         self.registers[x as usize] = diff;
     }
+
+    pub fn set_index_register(&mut self, nnn: u16) {
+        self.index = nnn as usize;
+    }
+
+    pub fn draw(&mut self, vx: u8, vy: u8, n: u8) {
+        let mut x = (self.registers[vx as usize] % 64) as usize;
+        let mut y = (self.registers[vy as usize] % 32) as usize;
+        self.registers[0xF] = 0;
+
+        for i in 0..n as usize {
+            let curr_byte = self.memory[self.index + i];
+            let curr_bits = bytes_to_binary(&curr_byte);
+            for bit in curr_bits {
+                if self.display[x][y] == true && bit == 1 {
+                    self.display[x][y] = false;
+                    self.registers[0xF] = 1;
+                } else if self.display[x][y] == false && bit == 0 {
+                    self.display[x][y] = true;
+                }
+
+                x += 1;
+                if x == 64 {
+                    x = (self.registers[vx as usize] % 64) as usize;
+                    break;
+                }
+            }
+
+            y += 1;
+            if y == 32 {
+                break;
+            }
+        }
+    }
+}
+
+fn bytes_to_binary(x: &u8) -> [u8; 8] {
+    let mut bits = [0u8; 8];
+    bits[0] = (x & 0b10000000) >> 7;
+    bits[1] = (x & 0b1000000) >> 6;
+    bits[2] = (x & 0b100000) >> 5;
+    bits[3] = (x & 0b10000) >> 4;
+    bits[4] = (x & 0b1000) >> 3;
+    bits[5] = (x & 0b100) >> 2;
+    bits[6] = (x & 0b10) >> 1;
+    bits[7] = x & 0b1;
+
+    bits
 }
