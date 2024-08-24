@@ -89,7 +89,7 @@ impl Chip8 {
 
         let kk = (opcode & 0x00FF) as u8;
 
-        eprintln!("Key: {:?}", self.key);
+        // eprintln!("Key: {:?}", self.key);
 
         match (c, x, y, d) {
             (0, 0, 0, 0) => {
@@ -166,7 +166,7 @@ impl Chip8 {
     }
 
     pub fn call_subroutine(&mut self, nnn: u16) {
-        eprintln!("CALL SUBROUTINE");
+        eprintln!("CALL SUBROUTINE, {:x}", &nnn);
         // Move program counter to address nnn
         // and put cuurent address on stack as return addr
         let sp = self.stack_pointer;
@@ -182,6 +182,7 @@ impl Chip8 {
     }
 
     pub fn skip_e(&mut self, x: u8, kk: u8) {
+        eprintln!("SKIP EQUAL {:x} {:x}", &x, &kk);
         if self.registers[x as usize] == kk {
             self.program_counter += 2;
         }
@@ -189,6 +190,7 @@ impl Chip8 {
     }
 
     pub fn skip_ne(&mut self, x: u8, kk: u8) {
+        eprintln!("SKIP NOTEQUAL {:x} {:x}", &x, &kk);
         if self.registers[x as usize] != kk {
             self.program_counter += 2;
         }
@@ -196,12 +198,14 @@ impl Chip8 {
     }
 
     pub fn skip_e_xy(&mut self, x: u8, y: u8) {
+        eprintln!("SKIP EQUAL XY {:x} {:x}", &x, &y);
         if self.registers[x as usize] == self.registers[y as usize] {
             self.program_counter += 2;
         }
         self.increment_pc();
     }
     pub fn skip_ne_xy(&mut self, x: u8, y: u8) {
+        eprintln!("SKIP NOTEQUAL XY {:x} {:x}", &x, &y);
         if self.registers[x as usize] != self.registers[y as usize] {
             self.program_counter += 2;
         }
@@ -209,6 +213,7 @@ impl Chip8 {
     }
 
     pub fn load_byte_in_x(&mut self, x: u8, kk: u8) {
+        eprintln!("LOAD KK IN X, {:x}, {:x}", &x, &kk);
         self.registers[x as usize] = kk;
         self.increment_pc();
     }
@@ -223,13 +228,13 @@ impl Chip8 {
     }
 
     pub fn load_y_in_x(&mut self, x: u8, y: u8) {
-        eprintln!("LOAD Y in X");
+        eprintln!("LOAD Y in X, {:x} {:x}", &x, &y);
         self.registers[x as usize] = self.registers[y as usize];
         self.increment_pc();
     }
 
     pub fn add_xy(&mut self, x: u8, y: u8) {
-        eprintln!("ADD XY");
+        eprintln!("ADD XY, {:x} {:x}", &x, &y);
         let arg1 = self.registers[x as usize];
         let arg2 = self.registers[y as usize];
 
@@ -245,6 +250,7 @@ impl Chip8 {
     }
 
     pub fn or_xy(&mut self, x: u8, y: u8) {
+        eprintln!("OR XY, {:x} {:x}", &x, &y);
         let arg1 = self.registers[x as usize];
         let arg2 = self.registers[y as usize];
 
@@ -253,6 +259,7 @@ impl Chip8 {
     }
 
     pub fn and_xy(&mut self, x: u8, y: u8) {
+        eprintln!("AND XY, {:x} {:x}", &x, &y);
         let arg1 = self.registers[x as usize];
         let arg2 = self.registers[y as usize];
 
@@ -261,6 +268,7 @@ impl Chip8 {
     }
 
     pub fn xor_xy(&mut self, x: u8, y: u8) {
+        eprintln!("XOR XY, {:x} {:x}", &x, &y);
         let arg1 = self.registers[x as usize];
         let arg2 = self.registers[y as usize];
 
@@ -269,6 +277,7 @@ impl Chip8 {
     }
 
     pub fn sub_xy(&mut self, x: u8, y: u8) {
+        eprintln!("SUB XY, {:x} {:x}", &x, &y);
         let arg1 = self.registers[x as usize];
         let arg2 = self.registers[y as usize];
 
@@ -282,7 +291,8 @@ impl Chip8 {
         self.increment_pc();
     }
 
-    pub fn shr_xy(&mut self, x: u8, _y: u8) {
+    pub fn shr_xy(&mut self, x: u8, y: u8) {
+        eprintln!("SHR XY, {:x} {:x}", &x, &y);
         let arg1 = self.registers[x as usize];
         // let arg2 = self.registers[_y as usize];
 
@@ -299,6 +309,7 @@ impl Chip8 {
         self.increment_pc();
     }
     pub fn subn_xy(&mut self, x: u8, y: u8) {
+        eprintln!("SUBN XY, {:x} {:x}", &x, &y);
         let arg1 = self.registers[x as usize];
         let arg2 = self.registers[y as usize];
 
@@ -313,7 +324,8 @@ impl Chip8 {
         self.increment_pc();
     }
 
-    pub fn shl_xy(&mut self, x: u8, _y: u8) {
+    pub fn shl_xy(&mut self, x: u8, y: u8) {
+        eprintln!("SHL XY, {:x} {:x}", &x, &y);
         let arg1 = self.registers[x as usize];
         let mut shl = arg1.shl(1);
 
@@ -328,16 +340,18 @@ impl Chip8 {
     }
 
     pub fn set_index_register(&mut self, nnn: u16) {
-        eprintln!("SET I, {:x}", nnn);
+        eprintln!("SET I, {:x}", &nnn);
         self.index = nnn as usize;
         self.increment_pc();
     }
 
     pub fn jump_nnn_v0(&mut self, nnn: u16) {
+        eprintln!("JUMP NNN+V0, {:x}", &nnn);
         self.program_counter = nnn as usize + self.registers[0] as usize;
     }
 
     pub fn rnd(&mut self, x: u8, kk: u8) {
+        eprintln!("RND, {:x} {:x}", &x, &kk);
         let mut rng = rand::thread_rng();
         let random: u8 = rng.gen();
 
@@ -372,6 +386,7 @@ impl Chip8 {
     }
 
     pub fn skip_x_key(&mut self, x: u8) {
+        eprintln!("SKIP IF KEY, {:x}", &x);
         if let Some(k) = self.key {
             if k == self.registers[x as usize] {
                 self.increment_pc();
@@ -381,6 +396,7 @@ impl Chip8 {
     }
 
     pub fn skip_nx_key(&mut self, x: u8) {
+        eprintln!("SKIP IF NOT KEY, {:x}", &x);
         if let Some(k) = self.key {
             if k != self.registers[x as usize] {
                 self.increment_pc();
@@ -390,10 +406,13 @@ impl Chip8 {
     }
 
     pub fn load_dt_in_x(&mut self, x: u8) {
+        eprintln!("LOAD DT IN X, {:x}", &x);
         self.registers[x as usize] = self.dt;
+        self.increment_pc();
     }
 
     pub fn wait_for_key(&mut self, x: u8) {
+        eprintln!("WAIT FOR KEY, {:x}", &x);
         if let Some(k) = self.key {
             self.registers[x as usize] = k;
             self.increment_pc();
@@ -401,42 +420,56 @@ impl Chip8 {
     }
 
     pub fn set_dt(&mut self, x: u8) {
+        eprintln!("SET DT, {:x}", &x);
         self.dt = self.registers[x as usize];
+        self.increment_pc();
     }
 
     pub fn set_st(&mut self, x: u8) {
+        eprintln!("SET ST, {:x}", &x);
         self.st = self.registers[x as usize];
+        self.increment_pc();
     }
 
     pub fn add_index_x(&mut self, x: u8) {
+        eprintln!("ADD TO INDEX, {:x}", &x);
         self.index = self.index + (self.registers[x as usize] as usize);
+        self.increment_pc();
     }
 
     pub fn load_sprite_in_index(&mut self, x: u8) {
+        eprintln!("LOAD SPRITE IN INDEX, {:x}", &x);
         self.index = (0x50 + (5 * x)) as usize;
+        self.increment_pc();
     }
 
     pub fn store_bcd_in_index(&mut self, x: u8) {
+        eprintln!("STORE BCD IN INDEX, {:x}", &x);
         let x = self.registers[x as usize] as u16;
         let ones = x % 10;
         let tens = (x % 100) - ones;
         let hundreds = (x % 1000) - tens - ones;
 
-        self.registers[self.index] = hundreds as u8;
-        self.registers[self.index + 1] = tens as u8;
-        self.registers[self.index + 2] = ones as u8;
+        self.memory[self.index] = hundreds as u8;
+        self.memory[self.index + 1] = tens as u8;
+        self.memory[self.index + 2] = ones as u8;
+        self.increment_pc();
     }
 
     pub fn dump_registers_in_memory(&mut self, x: u8) {
+        eprintln!("DUMP REGISTERS, {:x}", &x);
         for i in 0..x as usize {
             self.memory[self.index + i] = self.registers[i];
         }
+        self.increment_pc();
     }
 
     pub fn load_registers_from_memory(&mut self, x: u8) {
+        eprintln!("LOAD REGISTERS, {:x}", &x);
         for i in 0..x as usize {
             self.registers[i] = self.memory[self.index + i];
         }
+        self.increment_pc();
     }
 }
 

@@ -61,8 +61,7 @@ fn main() -> eframe::Result {
     let mut cpu = Chip8::new();
     cpu.program_counter = 0x200;
     let mut buf = Vec::new();
-    let mut rom =
-        BufReader::new(File::open("./Jumping X and O [Harry Kleinberg, 1977].ch8").unwrap());
+    let mut rom = BufReader::new(File::open("./Pong [Paul Vervalin, 1990].ch8").unwrap());
     let size = rom.read_to_end(&mut buf).unwrap();
     for i in 0..size as usize {
         cpu.memory[0x200 + i] = buf[i];
