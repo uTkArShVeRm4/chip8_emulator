@@ -44,9 +44,10 @@ impl eframe::App for MyApp {
                 for i in 0..4 {
                     ui.horizontal(|ui| {
                         for j in 0..4 {
-                            let button_label = format!("Button {}", i * 4 + j + 1);
+                            let button_label = format!("Button {:x}", i * 4 + j);
                             if ui.button(&button_label).clicked() {
                                 println!("{button_label} was clicked!");
+                                self.cpu.key = Some((i * 4 + j) as u8);
                             }
                         }
                     });
@@ -60,12 +61,13 @@ fn main() -> eframe::Result {
     let mut cpu = Chip8::new();
     cpu.program_counter = 0x200;
     let mut buf = Vec::new();
-    let mut rom = BufReader::new(File::open("./IBM Logo.ch8").unwrap());
+    let mut rom =
+        BufReader::new(File::open("./Jumping X and O [Harry Kleinberg, 1977].ch8").unwrap());
     let size = rom.read_to_end(&mut buf).unwrap();
     for i in 0..size as usize {
         cpu.memory[0x200 + i] = buf[i];
     }
     let app = MyApp { cpu };
     let options = NativeOptions::default();
-    run_native("Chip8", options, Box::new(|_cc| Ok(Box::new(app))))
+    run_native("", options, Box::new(|_cc| Ok(Box::new(app))))
 }

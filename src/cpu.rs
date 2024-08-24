@@ -19,7 +19,7 @@ pub struct Chip8 {
 
 impl Chip8 {
     pub fn new() -> Self {
-        Chip8 {
+        let mut chip = Chip8 {
             memory: [0u8; 4096],
             registers: [0u8; 16],
             display: [[false; 32]; 64],
@@ -31,7 +31,31 @@ impl Chip8 {
             key: None,
             dt: 0,
             st: 0,
+        };
+
+        let fonts = [
+            0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
+            0x20, 0x60, 0x20, 0x20, 0x70, // 1
+            0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
+            0xF0, 0x10, 0xF0, 0x10, 0xF0, // 3
+            0x90, 0x90, 0xF0, 0x10, 0x10, // 4
+            0xF0, 0x80, 0xF0, 0x10, 0xF0, // 5
+            0xF0, 0x80, 0xF0, 0x90, 0xF0, // 6
+            0xF0, 0x10, 0x20, 0x40, 0x40, // 7
+            0xF0, 0x90, 0xF0, 0x90, 0xF0, // 8
+            0xF0, 0x90, 0xF0, 0x10, 0xF0, // 9
+            0xF0, 0x90, 0xF0, 0x90, 0x90, // A
+            0xE0, 0x90, 0xE0, 0x90, 0xE0, // B
+            0xF0, 0x80, 0x80, 0x80, 0xF0, // C
+            0xE0, 0x90, 0x90, 0x90, 0xE0, // D
+            0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
+            0xF0, 0x80, 0xF0, 0x80, 0x80, // F
+        ];
+
+        for (idx, byte) in fonts.iter().enumerate() {
+            chip.memory[0x50 + idx] = *byte;
         }
+        chip
     }
 
     pub fn read_opcode(&self) -> u16 {
@@ -65,6 +89,8 @@ impl Chip8 {
 
         let kk = (opcode & 0x00FF) as u8;
 
+        eprintln!("Key: {:?}", self.key);
+
         match (c, x, y, d) {
             (0, 0, 0, 0) => {
                 self.running = false;
@@ -93,11 +119,24 @@ impl Chip8 {
             (0xB, _, _, _) => self.jump_nnn_v0(nnn),
             (0xC, _, _, _) => self.rnd(x, kk),
             (0xD, _, _, _) => self.draw(x, y, d), // d is n here, height of sprite
-            (0xE, _, 0x9, 0xE) => self.skip_x_key(x), // d is n here, height of sprite
-            (0xE, _, 0xA, 0x1) => self.skip_nx_key(x), // d is n here, height of sprite
-            (0xF, _, 0x0, 0x7) => self.load_dt_in_x(x), // d is n here, height of sprite
+            (0xE, _, 0x9, 0xE) => self.skip_x_key(x),
+            (0xE, _, 0xA, 0x1) => self.skip_nx_key(x),
+            (0xF, _, 0x0, 0x7) => self.load_dt_in_x(x),
+            (0xF, _, 0x0, 0xA) => self.wait_for_key(x),
+            (0xF, _, 0x1, 0x5) => self.set_dt(x),
+            (0xF, _, 0x1, 0x8) => self.set_st(x),
+            (0xF, _, 0x1, 0xE) => self.add_index_x(x),
+            (0xF, _, 0x2, 0x9) => self.load_sprite_in_index(x),
+            (0xF, _, 0x3, 0x3) => self.store_bcd_in_index(x),
+            (0xF, _, 0x5, 0x5) => self.dump_registers_in_memory(x),
+            (0xF, _, 0x6, 0x6) => self.load_registers_from_memory(x),
             _ => (),
         }
+
+        self.dt = self.dt.saturating_sub(1);
+        self.st = self.st.saturating_sub(1);
+
+        self.key = None;
     }
 
     pub fn clear_display(&mut self) {
@@ -367,6 +406,37 @@ impl Chip8 {
 
     pub fn set_st(&mut self, x: u8) {
         self.st = self.registers[x as usize];
+    }
+
+    pub fn add_index_x(&mut self, x: u8) {
+        self.index = self.index + (self.registers[x as usize] as usize);
+    }
+
+    pub fn load_sprite_in_index(&mut self, x: u8) {
+        self.index = (0x50 + (5 * x)) as usize;
+    }
+
+    pub fn store_bcd_in_index(&mut self, x: u8) {
+        let x = self.registers[x as usize] as u16;
+        let ones = x % 10;
+        let tens = (x % 100) - ones;
+        let hundreds = (x % 1000) - tens - ones;
+
+        self.registers[self.index] = hundreds as u8;
+        self.registers[self.index + 1] = tens as u8;
+        self.registers[self.index + 2] = ones as u8;
+    }
+
+    pub fn dump_registers_in_memory(&mut self, x: u8) {
+        for i in 0..x as usize {
+            self.memory[self.index + i] = self.registers[i];
+        }
+    }
+
+    pub fn load_registers_from_memory(&mut self, x: u8) {
+        for i in 0..x as usize {
+            self.registers[i] = self.memory[self.index + i];
+        }
     }
 }
 
