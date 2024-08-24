@@ -63,7 +63,7 @@ impl Chip8 {
 
         let nnn = opcode & 0x0FFF;
 
-        let kk = (opcode & 0x00FF >> 8) as u8;
+        let kk = (opcode & 0x00FF) as u8;
 
         match (c, x, y, d) {
             (0, 0, 0, 0) => {
@@ -101,7 +101,7 @@ impl Chip8 {
     }
 
     pub fn clear_display(&mut self) {
-        println!("CLEAR DISPLAY");
+        eprintln!("CLEAR DISPLAY");
         for i in 0..64 {
             for j in 0..32 {
                 self.display[i as usize][j as usize] = false;
@@ -111,7 +111,7 @@ impl Chip8 {
     }
 
     pub fn ret(&mut self) {
-        println!("RETURN");
+        eprintln!("RETURN");
         if self.program_counter == 0 {
             panic!("STACK UNDERFLOW");
         }
@@ -121,13 +121,13 @@ impl Chip8 {
     }
 
     pub fn jump_nnn(&mut self, nnn: u16) {
-        println!("JUMP NNN, {:x}", &nnn);
+        eprintln!("JUMP NNN, {:x}", &nnn);
         // Move program counter to address nnn
         self.program_counter = nnn as usize;
     }
 
     pub fn call_subroutine(&mut self, nnn: u16) {
-        println!("CALL SUBROUTINE");
+        eprintln!("CALL SUBROUTINE");
         // Move program counter to address nnn
         // and put cuurent address on stack as return addr
         let sp = self.stack_pointer;
@@ -175,28 +175,22 @@ impl Chip8 {
     }
 
     pub fn add_x_kk(&mut self, x: u8, kk: u8) {
-        println!("ADD X KK {:x} {:x}", &x, &kk);
+        eprintln!("ADD X KK {:x} {:x}", &x, &kk);
         let arg1 = self.registers[x as usize];
         let arg2 = kk;
-        let (sum, overflow) = arg1.overflowing_add(arg2);
-        if overflow {
-            self.registers[0xF] = 1;
-        } else {
-            self.registers[0xF] = 0;
-        }
 
-        self.registers[x as usize] = sum;
+        self.registers[x as usize] = arg1 + arg2;
         self.increment_pc();
     }
 
     pub fn load_y_in_x(&mut self, x: u8, y: u8) {
-        println!("LOAD Y in X");
+        eprintln!("LOAD Y in X");
         self.registers[x as usize] = self.registers[y as usize];
         self.increment_pc();
     }
 
     pub fn add_xy(&mut self, x: u8, y: u8) {
-        println!("ADD XY");
+        eprintln!("ADD XY");
         let arg1 = self.registers[x as usize];
         let arg2 = self.registers[y as usize];
 
@@ -295,7 +289,7 @@ impl Chip8 {
     }
 
     pub fn set_index_register(&mut self, nnn: u16) {
-        println!("SET I, {:x}", nnn);
+        eprintln!("SET I, {:x}", nnn);
         self.index = nnn as usize;
         self.increment_pc();
     }
@@ -313,15 +307,23 @@ impl Chip8 {
     }
 
     pub fn draw(&mut self, x: u8, y: u8, n: u8) {
-        println!("DRAW {:x} {:x} {:x}", &x, &y, &n);
+        eprintln!("DRAW {:x} {:x} {:x}", &x, &y, &n);
+        let cx = self.registers[x as usize] as usize % 64;
+        let cy = self.registers[y as usize] as usize % 32;
 
         for y in 0..n as usize {
             let pixels = self.memory[self.index + y];
             let bits = bytes_to_binary(&pixels);
+            if (cy + y) >= 32 {
+                break;
+            }
             for x in 0..8 {
+                if (cx + x) >= 64 {
+                    break;
+                }
                 let bit = if bits[x] > 0 { true } else { false };
-                self.display[x][y] = self.display[x][y] ^ bit;
-                if self.display[x][y] == false {
+                self.display[cx + x][cy + y] = self.display[x][y] ^ bit;
+                if self.display[cx + x][cy + y] == false {
                     self.registers[0xF] = 1;
                 }
             }

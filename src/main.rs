@@ -1,20 +1,22 @@
+use chip8_emulator::cpu::Chip8;
+use eframe;
+use eframe::egui::{self, Color32, Vec2};
+use eframe::{run_native, NativeOptions};
+use std::time::Duration;
 use std::{
     fs::File,
     io::{BufReader, Read},
 };
 
-use chip8_emulator::cpu::Chip8;
-
-use eframe;
-use eframe::egui::{self, Color32, Painter, Vec2};
-use eframe::{run_native, NativeOptions};
-
 struct MyApp {
-    cpu: chip8_emulator::cpu::Chip8,
+    cpu: Chip8,
 }
 
 impl eframe::App for MyApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.request_repaint_after(Duration::from_millis(16));
+
+        // Main display window
         egui::CentralPanel::default().show(ctx, |ui| {
             let painter = ui.painter();
             let display = self.cpu.display;
@@ -35,6 +37,22 @@ impl eframe::App for MyApp {
                 }
             }
         });
+
+        // Second window with 16 buttons
+        egui::Window::new("Control Panel").show(ctx, |ui| {
+            ui.vertical(|ui| {
+                for i in 0..4 {
+                    ui.horizontal(|ui| {
+                        for j in 0..4 {
+                            let button_label = format!("Button {}", i * 4 + j + 1);
+                            if ui.button(&button_label).clicked() {
+                                println!("{button_label} was clicked!");
+                            }
+                        }
+                    });
+                }
+            });
+        });
     }
 }
 
@@ -42,8 +60,7 @@ fn main() -> eframe::Result {
     let mut cpu = Chip8::new();
     cpu.program_counter = 0x200;
     let mut buf = Vec::new();
-    let mut rom =
-        BufReader::new(File::open("./Jumping X and O [Harry Kleinberg, 1977].ch8").unwrap());
+    let mut rom = BufReader::new(File::open("./IBM Logo.ch8").unwrap());
     let size = rom.read_to_end(&mut buf).unwrap();
     for i in 0..size as usize {
         cpu.memory[0x200 + i] = buf[i];
