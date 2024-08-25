@@ -1,5 +1,4 @@
 use core::panic;
-use std::ops::{Shl, Shr};
 
 use rand::Rng;
 
@@ -53,7 +52,7 @@ impl Chip8 {
         ];
 
         for (idx, byte) in fonts.iter().enumerate() {
-            chip.memory[0x50 + idx] = *byte;
+            chip.memory[idx] = *byte;
         }
         chip
     }
@@ -129,14 +128,16 @@ impl Chip8 {
             (0xF, _, 0x2, 0x9) => self.load_sprite_in_index(x),
             (0xF, _, 0x3, 0x3) => self.store_bcd_in_index(x),
             (0xF, _, 0x5, 0x5) => self.dump_registers_in_memory(x),
-            (0xF, _, 0x6, 0x6) => self.load_registers_from_memory(x),
+            (0xF, _, 0x6, 0x5) => self.load_registers_from_memory(x),
             _ => (),
         }
 
-        self.dt = self.dt.saturating_sub(1);
-        self.st = self.st.saturating_sub(1);
-
-        self.key = None;
+        if self.dt > 0 {
+            self.dt -= 1;
+        }
+        if self.st > 0 {
+            self.st -= 1;
+        }
     }
 
     pub fn clear_display(&mut self) {
@@ -222,8 +223,13 @@ impl Chip8 {
         eprintln!("ADD X KK {:x} {:x}", &x, &kk);
         let arg1 = self.registers[x as usize];
         let arg2 = kk;
-
-        self.registers[x as usize] = arg1 + arg2;
+        let (sum, overflow) = arg1.overflowing_add(arg2);
+        if overflow {
+            self.registers[0xF] = 1;
+        } else {
+            self.registers[0xF] = 0;
+        }
+        self.registers[x as usize] = sum;
         self.increment_pc();
     }
 
@@ -286,7 +292,7 @@ impl Chip8 {
         } else {
             self.registers[0xF] = 0;
         }
-        let diff = arg1 - arg2;
+        let (diff, _overflow) = arg1.overflowing_sub(arg2);
         self.registers[x as usize] = diff;
         self.increment_pc();
     }
@@ -296,16 +302,9 @@ impl Chip8 {
         let arg1 = self.registers[x as usize];
         // let arg2 = self.registers[_y as usize];
 
-        let mut shr = arg1.shr(1);
+        self.registers[0xF] = arg1 & 0b00000001;
+        self.registers[x as usize] = arg1 >> 1;
 
-        if (arg1 & 0x01) == 0x01 {
-            self.registers[0xF] = 1;
-        } else {
-            self.registers[0xF] = 0;
-        }
-
-        shr /= 2;
-        self.registers[x as usize] = shr;
         self.increment_pc();
     }
     pub fn subn_xy(&mut self, x: u8, y: u8) {
@@ -327,15 +326,9 @@ impl Chip8 {
     pub fn shl_xy(&mut self, x: u8, y: u8) {
         eprintln!("SHL XY, {:x} {:x}", &x, &y);
         let arg1 = self.registers[x as usize];
-        let mut shl = arg1.shl(1);
+        self.registers[0xF] = if arg1 & 0b10000000 != 0 { 1 } else { 0 };
 
-        if (arg1 & 0xA0) == 0xA0 {
-            self.registers[0xF] = 1;
-        } else {
-            self.registers[0xF] = 0;
-        }
-        shl *= 2;
-        self.registers[x as usize] = shl;
+        self.registers[x as usize] = arg1 << 1;
         self.increment_pc();
     }
 
@@ -359,26 +352,33 @@ impl Chip8 {
         self.increment_pc();
     }
 
-    pub fn draw(&mut self, x: u8, y: u8, n: u8) {
-        eprintln!("DRAW {:x} {:x} {:x}", &x, &y, &n);
-        let cx = self.registers[x as usize] as usize % 64;
-        let cy = self.registers[y as usize] as usize % 32;
+    pub fn draw(&mut self, vx: u8, vy: u8, n: u8) {
+        eprintln!("DRAW {:x} {:x} {:x}", vx, vy, n);
+        let x = self.registers[vx as usize] as usize % 64;
+        let y = self.registers[vy as usize] as usize % 32;
 
-        for y in 0..n as usize {
-            let pixels = self.memory[self.index + y];
-            let bits = bytes_to_binary(&pixels);
-            if (cy + y) >= 32 {
+        self.registers[0xF] = 0;
+
+        for row in 0..n as usize {
+            let pixels = self.memory[self.index + row];
+
+            if y + row >= 32 {
                 break;
             }
-            for x in 0..8 {
-                if (cx + x) >= 64 {
+
+            for col in 0..8 {
+                if x + col >= 64 {
                     break;
                 }
-                let bit = if bits[x] > 0 { true } else { false };
-                self.display[cx + x][cy + y] = self.display[x][y] ^ bit;
-                if self.display[cx + x][cy + y] == false {
+
+                let bit = (pixels >> (7 - col)) & 1;
+                let pixel_state = &mut self.display[x + col][y + row];
+
+                if *pixel_state && bit == 1 {
                     self.registers[0xF] = 1;
                 }
+
+                *pixel_state ^= bit == 1;
             }
         }
 
@@ -439,20 +439,17 @@ impl Chip8 {
 
     pub fn load_sprite_in_index(&mut self, x: u8) {
         eprintln!("LOAD SPRITE IN INDEX, {:x}", &x);
-        self.index = (0x50 + (5 * x)) as usize;
+        self.index = (0x50 + (5 * self.registers[x as usize])) as usize;
         self.increment_pc();
     }
 
     pub fn store_bcd_in_index(&mut self, x: u8) {
         eprintln!("STORE BCD IN INDEX, {:x}", &x);
-        let x = self.registers[x as usize] as u16;
-        let ones = x % 10;
-        let tens = (x % 100) - ones;
-        let hundreds = (x % 1000) - tens - ones;
+        let x = self.registers[x as usize];
 
-        self.memory[self.index] = hundreds as u8;
-        self.memory[self.index + 1] = tens as u8;
-        self.memory[self.index + 2] = ones as u8;
+        self.memory[self.index] = x / 100;
+        self.memory[self.index + 1] = (x / 10) % 10;
+        self.memory[self.index + 2] = x % 10;
         self.increment_pc();
     }
 
@@ -473,16 +470,16 @@ impl Chip8 {
     }
 }
 
-fn bytes_to_binary(x: &u8) -> [u8; 8] {
-    let mut bits = [0u8; 8];
-    bits[0] = (x & 0b10000000) >> 7;
-    bits[1] = (x & 0b1000000) >> 6;
-    bits[2] = (x & 0b100000) >> 5;
-    bits[3] = (x & 0b10000) >> 4;
-    bits[4] = (x & 0b1000) >> 3;
-    bits[5] = (x & 0b100) >> 2;
-    bits[6] = (x & 0b10) >> 1;
-    bits[7] = x & 0b1;
-
-    bits
-}
+// fn bytes_to_binary(x: &u8) -> [u8; 8] {
+//     let mut bits = [0u8; 8];
+//     bits[0] = (x & 0b10000000) >> 7;
+//     bits[1] = (x & 0b1000000) >> 6;
+//     bits[2] = (x & 0b100000) >> 5;
+//     bits[3] = (x & 0b10000) >> 4;
+//     bits[4] = (x & 0b1000) >> 3;
+//     bits[5] = (x & 0b100) >> 2;
+//     bits[6] = (x & 0b10) >> 1;
+//     bits[7] = x & 0b1;
+//
+//     bits
+// }

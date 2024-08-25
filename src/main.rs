@@ -21,7 +21,7 @@ impl eframe::App for MyApp {
             let painter = ui.painter();
             let display = self.cpu.display;
             let (height, width) = (display[0].len(), display.len());
-            let size = Vec2::new(20.0, 20.0); // Size of each "pixel"
+            let size = Vec2::new(5.0, 5.0); // Size of each "pixel"
             let origin = ui.min_rect().min; // Top-left corner of the painting area
             self.cpu.cycle();
             for y in 0..height {
@@ -61,7 +61,7 @@ fn main() -> eframe::Result {
     let mut cpu = Chip8::new();
     cpu.program_counter = 0x200;
     let mut buf = Vec::new();
-    let mut rom = BufReader::new(File::open("./Pong [Paul Vervalin, 1990].ch8").unwrap());
+    let mut rom = BufReader::new(File::open("./Space Invaders [David Winter].ch8").unwrap());
     let size = rom.read_to_end(&mut buf).unwrap();
     for i in 0..size as usize {
         cpu.memory[0x200 + i] = buf[i];
