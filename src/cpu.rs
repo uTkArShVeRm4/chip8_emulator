@@ -1,35 +1,38 @@
-use core::panic;
-
 use rand::Rng;
 
+const MEMORY_SIZE: usize = 4096;
+const NUM_REGISTERS: usize = 16;
+const STACK_SIZE: usize = 16;
+const NUM_KEYS: usize = 16;
+const DISPLAY_WIDTH: usize = 64;
+const DISPLAY_HEIGHT: usize = 32;
+
 pub struct Chip8 {
-    pub memory: [u8; 4096],
-    pub registers: [u8; 16],
-    pub display: [[bool; 32]; 64],
-    pub stack: [u16; 12],
+    pub memory: [u8; MEMORY_SIZE],
+    pub registers: [u8; NUM_REGISTERS],
+    pub display: [u8; DISPLAY_WIDTH * DISPLAY_HEIGHT],
+    pub stack: [u16; STACK_SIZE],
     pub program_counter: usize,
     pub stack_pointer: usize,
     pub index: usize,
-    pub running: bool,
-    pub key: Option<u8>,
-    pub dt: u8,
-    pub st: u8,
+    pub keys: [bool; NUM_KEYS],
+    pub delay_timer: u8,
+    pub sound_timer: u8,
 }
 
 impl Chip8 {
     pub fn new() -> Self {
         let mut chip = Chip8 {
-            memory: [0u8; 4096],
-            registers: [0u8; 16],
-            display: [[false; 32]; 64],
-            stack: [0u16; 12],
-            program_counter: 0usize,
-            stack_pointer: 0usize,
-            index: 0usize,
-            running: false,
-            key: None,
-            dt: 0,
-            st: 0,
+            memory: [0; MEMORY_SIZE],
+            registers: [0; NUM_REGISTERS],
+            display: [0; DISPLAY_WIDTH * DISPLAY_HEIGHT],
+            stack: [0; STACK_SIZE],
+            program_counter: 0, // Programs typically start at 0x200
+            stack_pointer: 0,
+            index: 0,
+            keys: [false; NUM_KEYS],
+            delay_timer: 0,
+            sound_timer: 0,
         };
 
         let fonts = [
@@ -57,429 +60,256 @@ impl Chip8 {
         chip
     }
 
-    pub fn read_opcode(&self) -> u16 {
-        let pos = self.program_counter;
-        let op_byte1 = self.memory[pos] as u16;
-        let op_byte2 = self.memory[pos + 1] as u16;
-        // basically concatenating the two bytes
-        op_byte1 << 8 | op_byte2
-    }
-
-    pub fn increment_pc(&mut self) {
-        self.program_counter += 2;
-    }
-
-    pub fn run(&mut self) {
-        self.running = true;
-        while self.running {
-            self.cycle();
-        }
+    fn increment_pc(&mut self) {
+        self.program_counter = self.program_counter.wrapping_add(2);
     }
 
     pub fn cycle(&mut self) {
-        let opcode = self.read_opcode();
+        if self.program_counter >= MEMORY_SIZE - 1 {
+            panic!("Program counter out of bounds");
+        }
 
-        let c = ((opcode & 0xF000) >> 12) as u8;
-        let x = ((opcode & 0x0F00) >> 8) as u8;
-        let y = ((opcode & 0x00F0) >> 4) as u8;
-        let d = ((opcode & 0x000F) >> 0) as u8;
+        let opcode = (self.memory[self.program_counter] as u16) << 8
+            | self.memory[self.program_counter + 1] as u16;
 
+        let x = ((opcode & 0x0F00) >> 8) as usize;
+        let y = ((opcode & 0x00F0) >> 4) as usize;
+        let n = (opcode & 0x000F) as u8;
+        let nn = (opcode & 0x00FF) as u8;
         let nnn = opcode & 0x0FFF;
 
-        let kk = (opcode & 0x00FF) as u8;
-
-        // eprintln!("Key: {:?}", self.key);
-
-        match (c, x, y, d) {
-            (0, 0, 0, 0) => {
-                self.running = false;
-                return;
-            }
-            (0, 0, 0xE, 0) => self.clear_display(),
-            (0, 0, 0xE, 0xE) => self.ret(),
-            (0x1, _, _, _) => self.jump_nnn(nnn),
-            (0x2, _, _, _) => self.call_subroutine(nnn),
-            (0x3, _, _, _) => self.skip_e(x, kk),
-            (0x4, _, _, _) => self.skip_ne(x, kk),
-            (0x5, _, _, 0x0) => self.skip_e_xy(x, y),
-            (0x6, _, _, _) => self.load_byte_in_x(x, kk),
-            (0x7, _, _, _) => self.add_x_kk(x, kk),
-            (0x8, _, _, 0x0) => self.load_y_in_x(x, y),
-            (0x8, _, _, 0x1) => self.or_xy(x, y),
-            (0x8, _, _, 0x2) => self.and_xy(x, y),
-            (0x8, _, _, 0x3) => self.xor_xy(x, y),
-            (0x8, _, _, 0x4) => self.add_xy(x, y),
-            (0x8, _, _, 0x5) => self.sub_xy(x, y),
-            (0x8, _, _, 0x6) => self.shr_xy(x, y),
-            (0x8, _, _, 0x7) => self.subn_xy(x, y),
-            (0x8, _, _, 0xE) => self.shl_xy(x, y),
-            (0x9, _, _, 0x0) => self.skip_ne_xy(x, y),
-            (0xA, _, _, _) => self.set_index_register(nnn),
-            (0xB, _, _, _) => self.jump_nnn_v0(nnn),
-            (0xC, _, _, _) => self.rnd(x, kk),
-            (0xD, _, _, _) => self.draw(x, y, d), // d is n here, height of sprite
-            (0xE, _, 0x9, 0xE) => self.skip_x_key(x),
-            (0xE, _, 0xA, 0x1) => self.skip_nx_key(x),
-            (0xF, _, 0x0, 0x7) => self.load_dt_in_x(x),
-            (0xF, _, 0x0, 0xA) => self.wait_for_key(x),
-            (0xF, _, 0x1, 0x5) => self.set_dt(x),
-            (0xF, _, 0x1, 0x8) => self.set_st(x),
-            (0xF, _, 0x1, 0xE) => self.add_index_x(x),
-            (0xF, _, 0x2, 0x9) => self.load_sprite_in_index(x),
-            (0xF, _, 0x3, 0x3) => self.store_bcd_in_index(x),
-            (0xF, _, 0x5, 0x5) => self.dump_registers_in_memory(x),
-            (0xF, _, 0x6, 0x5) => self.load_registers_from_memory(x),
-            _ => (),
+        match opcode & 0xF000 {
+            0x0000 => match nn {
+                0xE0 => self.clear_screen(),
+                0xEE => self.return_from_subroutine(),
+                _ => println!("Unknown opcode: {:X}", opcode),
+            },
+            0x1000 => self.jump(nnn),
+            0x2000 => self.call_subroutine(nnn),
+            0x3000 => self.skip_if_equal(x, nn),
+            0x4000 => self.skip_if_not_equal(x, nn),
+            0x5000 => self.skip_if_equal_reg(x, y),
+            0x6000 => self.set_register(x, nn),
+            0x7000 => self.add_to_register(x, nn),
+            0x8000 => self.alu_operations(x, y, n),
+            0x9000 => self.skip_if_not_equal_reg(x, y),
+            0xA000 => self.set_index(nnn),
+            0xB000 => self.jump_with_offset(nnn),
+            0xC000 => self.random(x, nn),
+            0xD000 => self.draw(x, y, n),
+            0xE000 => match nn {
+                0x9E => self.skip_if_key_pressed(x),
+                0xA1 => self.skip_if_key_not_pressed(x),
+                _ => println!("Unknown opcode: {:X}", opcode),
+            },
+            0xF000 => self.misc_operations(x, nn),
+            _ => println!("Unknown opcode: {:X}", opcode),
         }
 
-        if self.dt > 0 {
-            self.dt -= 1;
-        }
-        if self.st > 0 {
-            self.st -= 1;
-        }
+        self.update_timers();
     }
 
-    pub fn clear_display(&mut self) {
-        eprintln!("CLEAR DISPLAY");
-        for i in 0..64 {
-            for j in 0..32 {
-                self.display[i as usize][j as usize] = false;
-            }
-        }
+    fn clear_screen(&mut self) {
+        self.display.fill(0);
         self.increment_pc();
     }
 
-    pub fn ret(&mut self) {
-        eprintln!("RETURN");
-        if self.program_counter == 0 {
-            panic!("STACK UNDERFLOW");
+    fn return_from_subroutine(&mut self) {
+        if self.stack_pointer == 0 {
+            panic!("Stack underflow");
         }
         self.stack_pointer -= 1;
         self.program_counter = self.stack[self.stack_pointer] as usize;
         self.increment_pc();
     }
 
-    pub fn jump_nnn(&mut self, nnn: u16) {
-        eprintln!("JUMP NNN, {:x}", &nnn);
-        // Move program counter to address nnn
-        self.program_counter = nnn as usize;
+    fn jump(&mut self, addr: u16) {
+        self.program_counter = addr as usize;
     }
 
-    pub fn call_subroutine(&mut self, nnn: u16) {
-        eprintln!("CALL SUBROUTINE, {:x}", &nnn);
-        // Move program counter to address nnn
-        // and put cuurent address on stack as return addr
-        let sp = self.stack_pointer;
-        let stack = &mut self.stack;
-        if sp > stack.len() {
-            panic!("STACK OVERFLOW");
+    fn call_subroutine(&mut self, addr: u16) {
+        if self.stack_pointer >= STACK_SIZE {
+            panic!("Stack overflow");
         }
-
-        self.stack[sp] = self.program_counter as u16;
+        self.stack[self.stack_pointer] = self.program_counter as u16;
         self.stack_pointer += 1;
-        self.program_counter = nnn as usize;
-        self.increment_pc();
+        self.program_counter = addr as usize;
     }
 
-    pub fn skip_e(&mut self, x: u8, kk: u8) {
-        eprintln!("SKIP EQUAL {:x} {:x}", &x, &kk);
-        if self.registers[x as usize] == kk {
-            self.program_counter += 2;
-        }
-        self.increment_pc();
-    }
-
-    pub fn skip_ne(&mut self, x: u8, kk: u8) {
-        eprintln!("SKIP NOTEQUAL {:x} {:x}", &x, &kk);
-        if self.registers[x as usize] != kk {
-            self.program_counter += 2;
-        }
-        self.increment_pc();
-    }
-
-    pub fn skip_e_xy(&mut self, x: u8, y: u8) {
-        eprintln!("SKIP EQUAL XY {:x} {:x}", &x, &y);
-        if self.registers[x as usize] == self.registers[y as usize] {
-            self.program_counter += 2;
-        }
-        self.increment_pc();
-    }
-    pub fn skip_ne_xy(&mut self, x: u8, y: u8) {
-        eprintln!("SKIP NOTEQUAL XY {:x} {:x}", &x, &y);
-        if self.registers[x as usize] != self.registers[y as usize] {
-            self.program_counter += 2;
-        }
-        self.increment_pc();
-    }
-
-    pub fn load_byte_in_x(&mut self, x: u8, kk: u8) {
-        eprintln!("LOAD KK IN X, {:x}, {:x}", &x, &kk);
-        self.registers[x as usize] = kk;
-        self.increment_pc();
-    }
-
-    pub fn add_x_kk(&mut self, x: u8, kk: u8) {
-        eprintln!("ADD X KK {:x} {:x}", &x, &kk);
-        let arg1 = self.registers[x as usize];
-        let arg2 = kk;
-        let (sum, overflow) = arg1.overflowing_add(arg2);
-        if overflow {
-            self.registers[0xF] = 1;
-        } else {
-            self.registers[0xF] = 0;
-        }
-        self.registers[x as usize] = sum;
-        self.increment_pc();
-    }
-
-    pub fn load_y_in_x(&mut self, x: u8, y: u8) {
-        eprintln!("LOAD Y in X, {:x} {:x}", &x, &y);
-        self.registers[x as usize] = self.registers[y as usize];
-        self.increment_pc();
-    }
-
-    pub fn add_xy(&mut self, x: u8, y: u8) {
-        eprintln!("ADD XY, {:x} {:x}", &x, &y);
-        let arg1 = self.registers[x as usize];
-        let arg2 = self.registers[y as usize];
-
-        let (sum, overflow) = arg1.overflowing_add(arg2);
-        if overflow {
-            self.registers[0xF] = 1;
-        } else {
-            self.registers[0xF] = 0;
-        }
-
-        self.registers[x as usize] = sum;
-        self.increment_pc();
-    }
-
-    pub fn or_xy(&mut self, x: u8, y: u8) {
-        eprintln!("OR XY, {:x} {:x}", &x, &y);
-        let arg1 = self.registers[x as usize];
-        let arg2 = self.registers[y as usize];
-
-        self.registers[x as usize] = arg1 | arg2;
-        self.increment_pc();
-    }
-
-    pub fn and_xy(&mut self, x: u8, y: u8) {
-        eprintln!("AND XY, {:x} {:x}", &x, &y);
-        let arg1 = self.registers[x as usize];
-        let arg2 = self.registers[y as usize];
-
-        self.registers[x as usize] = arg1 & arg2;
-        self.increment_pc();
-    }
-
-    pub fn xor_xy(&mut self, x: u8, y: u8) {
-        eprintln!("XOR XY, {:x} {:x}", &x, &y);
-        let arg1 = self.registers[x as usize];
-        let arg2 = self.registers[y as usize];
-
-        self.registers[x as usize] = arg1 ^ arg2;
-        self.increment_pc();
-    }
-
-    pub fn sub_xy(&mut self, x: u8, y: u8) {
-        eprintln!("SUB XY, {:x} {:x}", &x, &y);
-        let arg1 = self.registers[x as usize];
-        let arg2 = self.registers[y as usize];
-
-        if arg1 > arg2 {
-            self.registers[0xF] = 1;
-        } else {
-            self.registers[0xF] = 0;
-        }
-        let (diff, _overflow) = arg1.overflowing_sub(arg2);
-        self.registers[x as usize] = diff;
-        self.increment_pc();
-    }
-
-    pub fn shr_xy(&mut self, x: u8, y: u8) {
-        eprintln!("SHR XY, {:x} {:x}", &x, &y);
-        let arg1 = self.registers[x as usize];
-        // let arg2 = self.registers[_y as usize];
-
-        self.registers[0xF] = arg1 & 0b00000001;
-        self.registers[x as usize] = arg1 >> 1;
-
-        self.increment_pc();
-    }
-    pub fn subn_xy(&mut self, x: u8, y: u8) {
-        eprintln!("SUBN XY, {:x} {:x}", &x, &y);
-        let arg1 = self.registers[x as usize];
-        let arg2 = self.registers[y as usize];
-
-        if arg2 > arg1 {
-            self.registers[0xF] = 1;
-        } else {
-            self.registers[0xF] = 0;
-        }
-
-        self.registers[x as usize] = arg2 - arg1;
-
-        self.increment_pc();
-    }
-
-    pub fn shl_xy(&mut self, x: u8, y: u8) {
-        eprintln!("SHL XY, {:x} {:x}", &x, &y);
-        let arg1 = self.registers[x as usize];
-        self.registers[0xF] = if arg1 & 0b10000000 != 0 { 1 } else { 0 };
-
-        self.registers[x as usize] = arg1 << 1;
-        self.increment_pc();
-    }
-
-    pub fn set_index_register(&mut self, nnn: u16) {
-        eprintln!("SET I, {:x}", &nnn);
-        self.index = nnn as usize;
-        self.increment_pc();
-    }
-
-    pub fn jump_nnn_v0(&mut self, nnn: u16) {
-        eprintln!("JUMP NNN+V0, {:x}", &nnn);
-        self.program_counter = nnn as usize + self.registers[0] as usize;
-    }
-
-    pub fn rnd(&mut self, x: u8, kk: u8) {
-        eprintln!("RND, {:x} {:x}", &x, &kk);
-        let mut rng = rand::thread_rng();
-        let random: u8 = rng.gen();
-
-        self.registers[x as usize] = kk & random;
-        self.increment_pc();
-    }
-
-    pub fn draw(&mut self, vx: u8, vy: u8, n: u8) {
-        eprintln!("DRAW {:x} {:x} {:x}", vx, vy, n);
-        let x = self.registers[vx as usize] as usize % 64;
-        let y = self.registers[vy as usize] as usize % 32;
-
-        self.registers[0xF] = 0;
-
-        for row in 0..n as usize {
-            let pixels = self.memory[self.index + row];
-
-            if y + row >= 32 {
-                break;
-            }
-
-            for col in 0..8 {
-                if x + col >= 64 {
-                    break;
-                }
-
-                let bit = (pixels >> (7 - col)) & 1;
-                let pixel_state = &mut self.display[x + col][y + row];
-
-                if *pixel_state && bit == 1 {
-                    self.registers[0xF] = 1;
-                }
-
-                *pixel_state ^= bit == 1;
-            }
-        }
-
-        self.increment_pc();
-    }
-
-    pub fn skip_x_key(&mut self, x: u8) {
-        eprintln!("SKIP IF KEY, {:x}", &x);
-        if let Some(k) = self.key {
-            if k == self.registers[x as usize] {
-                self.increment_pc();
-            }
-        }
-        self.increment_pc();
-    }
-
-    pub fn skip_nx_key(&mut self, x: u8) {
-        eprintln!("SKIP IF NOT KEY, {:x}", &x);
-        if let Some(k) = self.key {
-            if k != self.registers[x as usize] {
-                self.increment_pc();
-            }
-        }
-        self.increment_pc();
-    }
-
-    pub fn load_dt_in_x(&mut self, x: u8) {
-        eprintln!("LOAD DT IN X, {:x}", &x);
-        self.registers[x as usize] = self.dt;
-        self.increment_pc();
-    }
-
-    pub fn wait_for_key(&mut self, x: u8) {
-        eprintln!("WAIT FOR KEY, {:x}", &x);
-        if let Some(k) = self.key {
-            self.registers[x as usize] = k;
+    fn skip_if_equal(&mut self, x: usize, value: u8) {
+        if self.registers[x] == value {
             self.increment_pc();
         }
-    }
-
-    pub fn set_dt(&mut self, x: u8) {
-        eprintln!("SET DT, {:x}", &x);
-        self.dt = self.registers[x as usize];
         self.increment_pc();
     }
 
-    pub fn set_st(&mut self, x: u8) {
-        eprintln!("SET ST, {:x}", &x);
-        self.st = self.registers[x as usize];
-        self.increment_pc();
-    }
-
-    pub fn add_index_x(&mut self, x: u8) {
-        eprintln!("ADD TO INDEX, {:x}", &x);
-        self.index = self.index + (self.registers[x as usize] as usize);
-        self.increment_pc();
-    }
-
-    pub fn load_sprite_in_index(&mut self, x: u8) {
-        eprintln!("LOAD SPRITE IN INDEX, {:x}", &x);
-        self.index = (0x50 + (5 * self.registers[x as usize])) as usize;
-        self.increment_pc();
-    }
-
-    pub fn store_bcd_in_index(&mut self, x: u8) {
-        eprintln!("STORE BCD IN INDEX, {:x}", &x);
-        let x = self.registers[x as usize];
-
-        self.memory[self.index] = x / 100;
-        self.memory[self.index + 1] = (x / 10) % 10;
-        self.memory[self.index + 2] = x % 10;
-        self.increment_pc();
-    }
-
-    pub fn dump_registers_in_memory(&mut self, x: u8) {
-        eprintln!("DUMP REGISTERS, {:x}", &x);
-        for i in 0..x as usize {
-            self.memory[self.index + i] = self.registers[i];
+    fn skip_if_not_equal(&mut self, x: usize, value: u8) {
+        if self.registers[x] != value {
+            self.increment_pc();
         }
         self.increment_pc();
     }
 
-    pub fn load_registers_from_memory(&mut self, x: u8) {
-        eprintln!("LOAD REGISTERS, {:x}", &x);
-        for i in 0..x as usize {
-            self.registers[i] = self.memory[self.index + i];
+    fn skip_if_equal_reg(&mut self, x: usize, y: usize) {
+        if self.registers[x] == self.registers[y] {
+            self.increment_pc();
         }
         self.increment_pc();
+    }
+
+    fn set_register(&mut self, x: usize, value: u8) {
+        self.registers[x] = value;
+        self.increment_pc();
+    }
+
+    fn add_to_register(&mut self, x: usize, value: u8) {
+        self.registers[x] = self.registers[x].wrapping_add(value);
+        self.increment_pc();
+    }
+
+    fn alu_operations(&mut self, x: usize, y: usize, op: u8) {
+        match op {
+            0x0 => self.registers[x] = self.registers[y],
+            0x1 => self.registers[x] |= self.registers[y],
+            0x2 => self.registers[x] &= self.registers[y],
+            0x3 => self.registers[x] ^= self.registers[y],
+            0x4 => {
+                let (sum, overflow) = self.registers[x].overflowing_add(self.registers[y]);
+                self.registers[x] = sum;
+                self.registers[0xF] = overflow as u8;
+            }
+            0x5 => {
+                let (diff, borrow) = self.registers[x].overflowing_sub(self.registers[y]);
+                self.registers[x] = diff;
+                self.registers[0xF] = !borrow as u8;
+            }
+            0x6 => {
+                self.registers[0xF] = self.registers[x] & 1;
+                self.registers[x] >>= 1;
+            }
+            0x7 => {
+                let (diff, borrow) = self.registers[y].overflowing_sub(self.registers[x]);
+                self.registers[x] = diff;
+                self.registers[0xF] = !borrow as u8;
+            }
+            0xE => {
+                self.registers[0xF] = (self.registers[x] & 0x80) >> 7;
+                self.registers[x] <<= 1;
+            }
+            _ => println!("Unknown ALU opcode: {:X}", op),
+        }
+        self.increment_pc();
+    }
+
+    fn skip_if_not_equal_reg(&mut self, x: usize, y: usize) {
+        if self.registers[x] != self.registers[y] {
+            self.increment_pc();
+        }
+        self.increment_pc();
+    }
+
+    fn set_index(&mut self, value: u16) {
+        self.index = value as usize;
+        self.increment_pc();
+    }
+
+    fn jump_with_offset(&mut self, addr: u16) {
+        self.program_counter = (addr as usize + self.registers[0] as usize) & 0xFFF;
+    }
+
+    fn random(&mut self, x: usize, mask: u8) {
+        let random: u8 = rand::thread_rng().gen();
+        self.registers[x] = random & mask;
+        self.increment_pc();
+    }
+
+    fn draw(&mut self, x: usize, y: usize, height: u8) {
+        let x_coord = self.registers[x] as usize;
+        let y_coord = self.registers[y] as usize;
+        self.registers[0xF] = 0;
+
+        for row in 0..height as usize {
+            let sprite_byte = self.memory[self.index + row];
+            for col in 0..8 {
+                if (sprite_byte & (0x80 >> col)) != 0 {
+                    let pixel_x = (x_coord + col) % DISPLAY_WIDTH;
+                    let pixel_y = (y_coord + row) % DISPLAY_HEIGHT;
+                    let pixel_index = pixel_y * DISPLAY_WIDTH + pixel_x;
+
+                    if self.display[pixel_index] == 1 {
+                        self.registers[0xF] = 1;
+                    }
+                    self.display[pixel_index] ^= 1;
+                }
+            }
+        }
+        self.increment_pc();
+    }
+
+    fn skip_if_key_pressed(&mut self, x: usize) {
+        if self.keys[self.registers[x] as usize] {
+            self.increment_pc();
+        }
+        self.increment_pc();
+    }
+
+    fn skip_if_key_not_pressed(&mut self, x: usize) {
+        if !self.keys[self.registers[x] as usize] {
+            self.increment_pc();
+        }
+        self.increment_pc();
+    }
+
+    fn misc_operations(&mut self, x: usize, op: u8) {
+        match op {
+            0x07 => self.registers[x] = self.delay_timer,
+            0x0A => {
+                let mut key_pressed = false;
+                for (i, &key) in self.keys.iter().enumerate() {
+                    if key {
+                        self.registers[x] = i as u8;
+                        key_pressed = true;
+                        break;
+                    }
+                }
+                if !key_pressed {
+                    return; // Don't increment PC, repeat instruction
+                }
+            }
+            0x15 => self.delay_timer = self.registers[x],
+            0x18 => self.sound_timer = self.registers[x],
+            0x1E => {
+                self.index = self.index.wrapping_add(self.registers[x] as usize);
+                self.registers[0xF] = (self.index > 0xFFF) as u8;
+            }
+            0x29 => self.index = self.registers[x] as usize * 5,
+            0x33 => {
+                self.memory[self.index] = self.registers[x] / 100;
+                self.memory[self.index + 1] = (self.registers[x] / 10) % 10;
+                self.memory[self.index + 2] = self.registers[x] % 10;
+            }
+            0x55 => {
+                for i in 0..=x {
+                    self.memory[self.index + i] = self.registers[i];
+                }
+            }
+            0x65 => {
+                for i in 0..=x {
+                    self.registers[i] = self.memory[self.index + i];
+                }
+            }
+            _ => println!("Unknown misc opcode: {:X}", op),
+        }
+        self.increment_pc();
+    }
+
+    fn update_timers(&mut self) {
+        if self.delay_timer > 0 {
+            self.delay_timer -= 1;
+        }
+        if self.sound_timer > 0 {
+            self.sound_timer -= 1;
+            // TODO: Implement sound
+        }
     }
 }
-
-// fn bytes_to_binary(x: &u8) -> [u8; 8] {
-//     let mut bits = [0u8; 8];
-//     bits[0] = (x & 0b10000000) >> 7;
-//     bits[1] = (x & 0b1000000) >> 6;
-//     bits[2] = (x & 0b100000) >> 5;
-//     bits[3] = (x & 0b10000) >> 4;
-//     bits[4] = (x & 0b1000) >> 3;
-//     bits[5] = (x & 0b100) >> 2;
-//     bits[6] = (x & 0b10) >> 1;
-//     bits[7] = x & 0b1;
-//
-//     bits
-// }
